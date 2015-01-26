@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning: Weight Lifting Form Prediction Algorithm"
+author: Colin King
+date: Sun, Jan. 25, 2015
+output: html_document
+---
+
+```{r echo=FALSE, results=FALSE}
+library(knitr)
+opts_chunk$set(cache=TRUE)
+```
+
+
+**Overview**
+
+This writeup will document a machine learning algorithm that predicts whether a user is using the correct mechanics during a weight lifting exercise based on the readings of a variety of sensors. The algorithm produced below uses a random forest algorithm with 10 random forests and 300 trees in each forest. The reason that we are using a random forest algorithm is because this kind of algorithm can have very high accuracy. With the use of parallel computing, we are able to construct the forests in a reasonable amount of time. Furthermore, the algorithm achieves a 99.5% accuracy on a test data set and 100% accuracy on the evaluation data set.
+
+**Importing Libraries**
+
+We need a few libraries to create the functions below. We're going to import them now.
+```{r}
+invisible(library(Hmisc))
+invisible(library(caret))
+invisible(library(randomForest))
+invisible(library(doParallel))
+```
+
+**Processing the Data**
+
+In this section, we will download the data from the Internet and preprocess it.
+
+First, let's download the data
+```{r}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv", method='curl')
+```
+
+And then read it from the downloaded csv files. We need to filter out "#DIV/0!" strings that appear in the data sets and replace them with NAs.
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("#DIV/0!"))
+```
+
+Now to do the actual preprocessing: Here are the column names in out data set.
+```{r}
+str(training)
+```
+
+The first seven rows contain metadata about each trial and thus won't be useful as predictors in our machine learning algorithm. Let's remove them.
+```{r}
+training <- training[,8:dim(training)[2]]
+```
+
+We can also see from above that our data contains NAs. Let's use only the complete cases by keeping only the columns that have no NAs.
+```{r}
+training <- training[which(colSums(is.na(training)) == 0)]
+```
+
+Finally, we saw that the data types varied across the different columns. Let's normalize them and make them all numerics.
+```{r}
+for(i in 1:(dim(training)[2]-1)) {training[,i] <- as.numeric(training[,i])}
+```
+
+**Partition the Data**
+
+Great. The data is now preprocessed, so we can start training our model. It's important that we use cross-validation in our algorithm so that we can be sure we product a successful model. Let's start by partitioning the training set into a train data set and test data set. We will use 75% of our model for training and 25% for testing. Before we do this, we're going to set the seed so that our data can be reproduced.
+```{r}
+set.seed(1234)
+partition <- createDataPartition(y=training$classe, p=0.75, list=FALSE)
+train <- training[partition,]
+test <- training[-partition,]
+```
+
+**Creating the Random Forest Model**
+
+Now that we have our training data set, let's create a random forest model and speed it up by taking advantage of parallel computing.
+```{r}
+registerDoParallel()
+x <- train[-ncol(train)]
+y <- train$classe
+rf <- foreach(ntree = rep(300, 10), .combine = randomForest::combine, .packages = 'randomForest') %dopar% {
+  randomForest(x, y, ntree = ntree) 
+}
+```
+
+**Examining Our Predictions**
+
+We have our model, let's now apply it and see how well it did. Let's first test it on the train data set and create a confusion matrix of it.
+```{r}
+training.predictions <- predict(rf, newdata = train)
+confusionMatrix(training.predictions, train$classe)
+```
+
+It looks like we had 100% accuracy on the training set. Let's now get our out-of-sample error by calculating the accuracy on the test set.
+```{r}
+testing.predictions <- predict(rf, newdata = test)
+confusionMatrix(testing.predictions, test$classe)
+```
+
+It looks like our algorithm was correct 99.51% of the time. 
+
+**Conclusions**
+
+We can see from the matricies above that this algorithm had a very high success rate. 
+
+**Uploading to Coursera**
+
+With our prediction model finished, we can now test it on the evaluation model by making our predictions on the evaluation set.
+
+We are going to run through similar steps as above and print our answers here.
+```{r}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv", method='curl')
+testing <- read.csv("pml-testing.csv", na.strings=c("#DIV/0!"))
+testing <- testing[,8:dim(testing)[2]]
+testing <- testing[which(colSums(is.na(testing)) == 0)]
+for(i in 1:(dim(testing)[2]-1)) {testing[,i] <- as.numeric(testing[,i])}
+testing <- testing[colnames(testing) != "problem_id"]
+answers <- predict(rf, newdata=testing)
+print(answers)
+```
+
+**Citations**
+
+The weight lifting dataset was used from Groupware@LES
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3PsayWxoQ
